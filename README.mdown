@@ -1,0 +1,6 @@
+This is a port of [Cloudant Sync for Android](https://github.com/cloudant/sync-android) to Python.
+
+It is essentially a better-embeddable version of [Apache CouchDB](http://couchdb.apache.org/) that can sync between
+a local embedded DB and a remote CouchDB database.
+
+**It is not complete. If you are reading this statement, do not use this yet. Thanks.**

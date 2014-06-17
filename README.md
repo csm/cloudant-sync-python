@@ -1,2 +1,0 @@
-cloudant-sync-python
-====================
