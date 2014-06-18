@@ -52,8 +52,13 @@ class DocumentRevision(object):
         row = c.fetchone()
         if row is None:
             return None
+        return DocumentRevision.from_row(row)
+
+    @staticmethod
+    def from_row(row):
         doc_id, internal_id, rev_id, sequence, json, current, deleted = row
-        return DocumentRevision(doc_id, rev_id, DocumentBody(bytes_value=json), sequence, internal_id, deleted > 0, current > 0)
+        return DocumentRevision(doc_id, rev_id, DocumentBody(bytes_value=json), sequence, internal_id, deleted > 0,
+                                current > 0)
 
     @property
     def generation(self):

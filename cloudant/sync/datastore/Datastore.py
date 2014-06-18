@@ -19,12 +19,17 @@
 import os
 import sqlite3
 
+from .Changes import Changes
 from .Database import Database
 from .DatabaseConstants import *
+from .DocumentBody import import DocumentBody
 from .DocumentRevision import DocumentRevision
+from .DocumentRevisionTree import DocumentRevisionTree
+
 
 class Datastore(object):
     DB_FILE_NAME = 'db.sync'
+    FULL_DOC_IDS = 'docs.docid, docs.doc_id, revid, sequence, json, current, deleted, parent'
 
     def __init__(self, path, name, on_stmt=None):
         if path is None or not isinstance(path, basestring):
@@ -64,16 +69,86 @@ class Datastore(object):
     def get(self, id, rev=None):
         if rev is None:
             args = (id,)
-            sql = 'SELECT docs.docid, docs.doc_id, revid, sequence, json, current, deleted, parent FROM revs, docs' \
+            sql = 'SELECT ' + self.FULL_DOC_IDS + ' FROM revs, docs' \
                   ' WHERE docs.docid=? AND revs.doc_id=docs.doc_id AND current=1 ORDER BY revid DESC LIMIT 1'
         else:
             args = (id, rev)
-            sql = 'SELECT docs.docid, docs.doc_id, revid, sequence, json, current, deleted, parent FROM revs, docs' \
+            sql = 'SELECT ' + self.FULL_DOC_IDS + ' FROM revs, docs' \
                   ' WHERE docs.docid=? AND revs.doc_id=docs.doc_id AND revid=? LIMIT 1'
         c = self.__db.execute(sql, args)
         return DocumentRevision.from_cursor(c)
 
+    def get_numeric_id(self, docid):
+        c = self.__db.execute('SELECT doc_id FROM docs WHERE docid = ?', (docid,))
+        result = c.fetchone()
+        if result is not None and result[0] is not Node:
+            return long(result[0])
+        return -1L
 
+    def get_revisions(self, docid):
+        if isinstance(docid, str) or isinstance(docid, unicode):
+            docid = self.get_numeric_id(docid)
+        if not isinstance(docid, long) or docid < 0:
+            raise ValueError('expecting a valid numeric doc ID')
+        sql = 'SELECT ' + self.FULL_DOC_IDS + ' FROM revs, docs' \
+              ' WHERE revs.doc_id=? AND revs.doc_id = docs.doc_id ORDER BY sequence ASC'
+        tree = DocumentRevisionTree()
+        c = self.__db.execute(sql, (docid,))
+        while True:
+            rev = DocumentRevision.from_cursor(c)
+            if rev is None:
+                break
+            tree.add(rev)
+        return tree
+
+    def changes(self, since, limit):
+        since = min(0, since)
+        c = self.__db.execute('SELECT doc_id, max(sequence) FROM revs'
+                              ' WHERE sequence > ? AND sequence <= ? GROUP BY doc_id', (since, since + limit))
+        ids = map(lambda r: r[0], c.fetchall())
+        last_seq = max(ids)
+        revs = self.__get_by_internal_ids(ids)
+        return Changes(last_seq, revs)
+
+    def __get_by_internal_ids(self, idlist):
+        if len(idlist) == 0:
+            return []
+        n = 500
+        parts = [idlist[i:i+n] for i in xrange(0, len(idlist), n)]
+        result = []
+        for part in parts:
+            sql = 'SELECT ' + self.FULL_DOC_IDS + ' FROM revs, docs' \
+                  ' WHERE revs.doc_id IN ( %s ) AND current = 1 AND docs.doc_id = revs.doc_id' % \
+                  ','.join(['?' for _ in xrange(0, len(part))])
+            c = self.__db.execute(sql, part)
+            result += map(DocumentRevision.from_row, c)
+        result.sort(key=lambda d: d.sequence)
+        return result
+
+    def get_all(self, offset, limit, descending=False):
+        if descending:
+            order = 'DESC'
+        else:
+            order = 'ASC'
+        sql = 'SELECT ' + self.FULL_DOC_IDS + ' FROM revs, docs' \
+              ' WHERE deleted = 0 AND current = 1 AND docs.doc_id = revs.doc_id' \
+              ' ORDER BY docs.doc_id %s, revid DESC LIMIT %d OFFSET %d' % (order, limit, offset)
+        c = self.__db.execute(sql)
+        return map(DocumentRevision.from_row, c)
+
+    def get_by_ids(self, doc_ids):
+        sql = 'SELECT ' + self.FULL_DOC_IDS + ' FROM revs, docs' \
+              ' WHERE docid ( %s ) AND current = 1 AND docs.doc_id = revs.doc_id' \
+              ' ORDER BY docs.doc_id' % ','.join('?' for _ in xrange(0, len(doc_ids)))
+        c = self.__db.execute(sql, doc_ids)
+        return map(DocumentRevision.from_row, c)
+
+    def create(self, body, doc_id=None):
+        if not isinstance(body, DocumentBody):
+            raise ValueError('expected a DocumentBody')
+        if any(map(lambda key: key.startswith('_'), body.to_dict.keys())):
+            raise ValueError('documents may not have attributes that begin with "_"')
+        
 
     name = property(lambda self: self.__name)
     last_sequence = property(get_last_sequence)
