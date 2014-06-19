@@ -22,7 +22,7 @@ import sqlite3
 from .Changes import Changes
 from .Database import Database
 from .DatabaseConstants import *
-from .DocumentBody import import DocumentBody
+from .DocumentBody import DocumentBody
 from .DocumentRevision import DocumentRevision
 from .DocumentRevisionTree import DocumentRevisionTree
 
@@ -148,7 +148,14 @@ class Datastore(object):
             raise ValueError('expected a DocumentBody')
         if any(map(lambda key: key.startswith('_'), body.to_dict.keys())):
             raise ValueError('documents may not have attributes that begin with "_"')
-        
+        self.__db.begin_transaction()
+        try:
+            numeric_id = self.__insert_doc_id(doc_id)
+        finally:
+            self.__db.end_transaction()
+
+    def __insert_doc_id(self, docid):
+        return self.__db.insert('docs', {'docid': docid})
 
     name = property(lambda self: self.__name)
     last_sequence = property(get_last_sequence)

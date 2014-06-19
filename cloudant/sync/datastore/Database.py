@@ -23,6 +23,7 @@ class Database(object):
     def __exec_stmt(self, sql, params=()):
         c = self.execute(sql, params)
         c.fetchall()
+        return c
 
     def get_version(self):
         c = self.execute("PRAGMA user_version;")
@@ -92,5 +93,8 @@ class Database(object):
             sep = ', '
         query += ') VALUES (%s)' % ','.join(['?' for _ in range(0, len(values))])
         changes = self.__connection.total_changes
-        self.__exec_stmt(query, values.values())
-        return self.__connection.total_changes - changes
+        cursor = self.__exec_stmt(query, values.values())
+        return cursor.lastrowid
+
+    def insert(self, table, values):
+        return self.insert_with_on_conflict(table, values, '')
