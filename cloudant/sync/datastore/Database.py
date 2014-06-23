@@ -92,7 +92,6 @@ class Database(object):
             query += '%s%s=' % (sep, key)
             sep = ', '
         query += ') VALUES (%s)' % ','.join(['?' for _ in range(0, len(values))])
-        changes = self.__connection.total_changes
         cursor = self.__exec_stmt(query, values.values())
         return cursor.lastrowid
 
