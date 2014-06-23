@@ -45,7 +45,7 @@ class Database(object):
 
     def end_transaction(self):
         success = self.__transaction_stack.pop()
-        print '[end_transaction] transaction stack: ' + str(self.__transaction_stack)
+        # print '[end_transaction] transaction stack: ' + str(self.__transaction_stack)
         if not success:
             self.__transaction_set_success = False
         if len(self.__transaction_stack) == 0:
@@ -57,7 +57,7 @@ class Database(object):
 
     def set_transaction_success(self):
         self.__transaction_stack[-1] = True
-        print 'transaction stack:', str(self.__transaction_stack)
+        # print 'transaction stack:', str(self.__transaction_stack)
 
     def compact_database(self):
         self.execute('VACUUM;')

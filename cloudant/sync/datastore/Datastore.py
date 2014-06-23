@@ -16,9 +16,14 @@
 # either express or implied. See the License for the specific language governing permissions
 # and limitations under the License.
 
+import base64
+import itertools
 import os
 import sqlite3
+import tempfile
 
+from .Attachment import UnsavedBytesAttachment
+from .AttachmentManager import AttachmentManager, PreparedAttachment
 from .errors import *
 from .events import *
 from .Changes import Changes
@@ -47,10 +52,12 @@ class Datastore(object):
         else:
             self.__path = ':memory:'
             self.__name = name
+            self.__extensions_dir = None
             self.__db = Database(sqlite3.connect(':memory:'), on_stmt)
         self.__update_schema(SCHEMA_VERSION_3, 3)
         self.__update_schema(getSCHEMA_VERSION_4(), 4)
         self.__callbacks = {}
+        self.__attachment_manager = AttachmentManager(self)
 
     def __update_schema(self, schema, version):
         self.__db.execute('PRAGMA foreign_keys = ON;')
@@ -64,6 +71,11 @@ class Datastore(object):
                 self.__db.set_transaction_success()
             finally:
                 self.__db.end_transaction()
+
+    def extension_data_dir(self, extension):
+        if self.__extensions_dir is not None:
+            return os.path.join(self.__extensions_dir, extension)
+        return os.path.join(tempfile.gettempdir(), extension)
 
     def add_callback(self, name, callback):
         l = self.__callbacks.get(name, [])
@@ -89,6 +101,9 @@ class Datastore(object):
 
     def __contains__(self, item):
         return self.get(item) is not None
+
+    def get_sql(self):
+        return self.__db
 
     def get(self, doc_id, rev=None):
         if rev is None:
@@ -318,6 +333,159 @@ class Datastore(object):
                     except:
                         pass
             self.__db.end_transaction()
+
+    def delete_local(self, doc_id):
+        if doc_id is None or len(doc_id) == 0:
+            raise ValueError('document ID cannot be empty')
+        rows_del = self.__db.delete('localdocs', 'docid=?', (doc_id,))
+        if rows_del == 0:
+            raise DocumentNotFoundError('no local doc with id: ' + doc_id)
+
+    def get_public_id(self):
+        c = self.__db.execute('SELECT value FROM info WHERE key=\'publicUUID\'')
+        row = c.fetchone()
+        if row is None:
+            raise ValueError('failed to query publicUUID; is the DB initialized?')
+        return 'touchdb_' + str(row[0])
+
+    def force_insert(self, doc_rev, rev_history, attachments):
+        if not isinstance(doc_rev, DocumentRevision):
+            raise ValueError('doc_rev must be a DocumentRevision')
+        if rev_history is None or len(rev_history) == 0 or rev_history[-1] != doc_rev.revid:
+            raise ValueError('rev_history must be non empty, and must end with the document\'s rev')
+        a, b = itertools.tee(rev_history)
+        next(b, None)
+        if any(map(lambda pair: Datastore.__gen_from_rev(pair[0]) >= Datastore.__gen_from_rev(pair[1]),
+                   itertools.izip(a, b))):
+            raise ValueError('rev_history must be in order')
+        doc_created = None
+        doc_updated = None
+        ok = True
+        self.__db.begin_transaction()
+        try:
+            if doc_rev.docid in self:
+                seq = self.__do_force_insert(doc_rev, rev_history)
+                doc_rev._DocumentRevision_sequence = seq
+                doc_updated = DocumentUpdated(None, doc_rev)
+            else:
+                seq = self.__do_force_create(doc_rev, rev_history)
+                doc_rev._DocumentRevision_sequence = seq
+                doc_created = DocumentCreated(doc_rev)
+            if attachments is not None:
+                for key, value in attachments.items():
+                    data = base64.b64decode(value['data'])
+                    type = value['content_type']
+                    att = UnsavedBytesAttachment(key, type, data)
+                    result = False
+                    try:
+                        prepped = PreparedAttachment(att)
+                        result = self.__attachment_manager.add_attachment(prepped, doc_rev)
+                    except:
+                        pass
+                    if not result:
+                        ok = False
+                        break
+            if ok:
+                self.__db.set_transaction_success()
+        finally:
+            self.__invoke_callbacks('DocumentCreated', doc_created)
+            self.__invoke_callbacks('DocumentUpdated', doc_updated)
+            self.__db.end_transaction()
+
+    def __do_force_insert(self, doc_rev, rev_history):
+        numeric_id = self.get_numeric_id(doc_rev.docid)
+        local_revs = self.get_revisions(doc_rev.docid)
+        assert local_revs is not None
+        parent = local_revs.lookup(doc_rev.docid, rev_history[0])
+        if parent is None:
+            seq = self.__insert_into_new_tree(doc_rev, rev_history, numeric_id, local_revs)
+        else:
+            seq = self.__insert_into_existing_tree(doc_rev, rev_history, numeric_id, local_revs)
+        return seq
+
+    def __insert_into_new_tree(self, doc_rev, rev_history, numeric_id, local_revs):
+        prev_winner = local_revs.current_rev()
+        parent_seq = 0L
+        for rev in rev_history:
+            parent_seq = self.__insert_stub_rev(numeric_id, rev, parent_seq)
+            new_node = self.get(doc_rev.docid, rev)
+            local_revs.add(new_node)
+        seq = self.__insert_rev(numeric_id, doc_rev.revid, parent_seq, doc_rev.deleted, True, doc_rev.to_bytes(),
+                                not doc_rev.deleted)
+        new_leaf = self.get(doc_rev.docid, doc_rev.revid)
+        local_revs.add(new_leaf)
+        self.__pick_winner_of_conflicts(local_revs, new_leaf, prev_winner)
+        return seq
+
+    def __insert_into_existing_tree(self, doc_rev, rev_history, numeric_id, local_revs):
+        parent = local_revs.lookup(doc_rev.docid, rev_history[0])
+        if parent is None:
+            raise ValueError('parent must exist')
+        prev_leaf = local_revs.current_rev()
+        i = 1
+        while i < len(rev_history):
+            next_node = local_revs.child_by_rev(parent, rev_history[i])
+            if next_node is None:
+                break
+            else:
+                parent = next_node
+            i += 1
+        if i >= len(rev_history):
+            return -1
+        while i < len(rev_history) - 1:
+            self.__change_to_not_current(parent.sequence)
+            self.__insert_stub_rev(numeric_id, rev_history[i], parent.sequence)
+            parent = self.get(doc_rev.docid, rev_history[i])
+            local_revs.add(parent)
+        new_revid = rev_history[-1]
+        self.__change_to_not_current(parent.sequence)
+        seq = self.__insert_rev(numeric_id, new_revid, parent.sequence, doc_rev.deleted, True, doc_rev.to_bytes(), True)
+        new_leaf = self.get(doc_rev.docid, new_revid)
+        prev_leaf = self.get(prev_leaf.docid, prev_leaf.revid)
+        if prev_leaf.current:
+            self.__pick_winner_of_conflicts(local_revs, new_leaf, prev_leaf)
+        return seq
+
+    def __insert_stub_rev(self, numeric_id, rev, parent_seq):
+        return self.__insert_rev(numeric_id, rev, parent_seq, False, False, '{}', False)
+
+    def __pick_winner_of_conflicts(self, object_tree, new_leaf, previous_leaf):
+        if new_leaf.deleted == previous_leaf.deleted:
+            prev_leaf_depth = object_tree.depth(previous_leaf.sequence)
+            new_leaf_depth = object_tree.depth(new_leaf.sequence)
+            if prev_leaf_depth > new_leaf_depth:
+                self.__change_to_not_current(new_leaf.sequence)
+            elif prev_leaf_depth < new_leaf_depth:
+                self.__change_to_not_current(previous_leaf.sequence)
+            else:
+                prev_rev_hash = previous_leaf.revid
+                new_rev_hash = new_leaf.revid
+                if prev_rev_hash.split('-')[1] > new_rev_hash.split('-')[1]:
+                    self.__change_to_not_current(new_leaf.sequence)
+                else:
+                    self.__change_to_not_current(previous_leaf.sequence)
+        else:
+            if new_leaf.deleted:
+                self.__change_to_not_current(new_leaf.sequence)
+            else:
+                self.__change_to_not_current(previous_leaf.sequence)
+
+    def __change_to_not_current(self, seq):
+        self.__db.update('revs', {'current': 0}, 'sequence=?', (seq,))
+
+    def __invoke_callbacks(self, tag, value):
+        if value is not None:
+            l = self.__callbacks.get(tag, [])
+            for cb in l:
+                try:
+                    cb(value)
+                except:
+                    pass
+
+    @staticmethod
+    def __gen_from_rev(rev):
+        x = rev.split('-')
+        return int(x[0])
 
     @staticmethod
     def __new_rev(old_rev):
