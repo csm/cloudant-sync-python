@@ -20,3 +20,8 @@ class DocumentCreated(DocumentModified):
 class DocumentUpdated(DocumentModified):
     def __init__(self, old_rev, new_rev):
         DocumentModified.__init__(self, old_rev, new_rev)
+
+
+class DocumentDeleted(DocumentModified):
+    def __init__(self, old_rev, new_rev):
+        DocumentModified.__init__(self, old_rev, new_rev)

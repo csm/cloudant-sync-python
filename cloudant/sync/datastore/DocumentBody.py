@@ -39,7 +39,7 @@ class DocumentBody(object):
 
     def to_bytes(self):
         if self.__bytes is None:
-            self.__bytes = json.dumps(self._dict)
+            self.__bytes = json.dumps(self.__dict)
         return self.__bytes
 
     def to_dict(self):

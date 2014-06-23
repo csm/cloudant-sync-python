@@ -29,6 +29,14 @@ class Database(object):
         c = self.execute("PRAGMA user_version;")
         return c.fetchone()[0]
 
+    def is_closed(self):
+        return self.__connection is not None
+
+    def close(self):
+        if self.__connection is not None:
+            self.__connection.close()
+            self.__connection = None
+
     def begin_transaction(self):
         if len(self.__transaction_stack) == 0:
             self.__cursor = self.__connection.cursor()
@@ -37,6 +45,7 @@ class Database(object):
 
     def end_transaction(self):
         success = self.__transaction_stack.pop()
+        print '[end_transaction] transaction stack: ' + str(self.__transaction_stack)
         if not success:
             self.__transaction_set_success = False
         if len(self.__transaction_stack) == 0:
@@ -89,7 +98,7 @@ class Database(object):
         query = 'INSERT %s INTO %s (' % (on_conflict, table)
         sep = ''
         for key in values.keys():
-            query += '%s%s=' % (sep, key)
+            query += '%s%s' % (sep, key)
             sep = ', '
         query += ') VALUES (%s)' % ','.join(['?' for _ in range(0, len(values))])
         cursor = self.__exec_stmt(query, values.values())

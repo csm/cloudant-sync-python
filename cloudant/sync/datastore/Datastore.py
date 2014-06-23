@@ -33,16 +33,21 @@ class Datastore(object):
     DB_FILE_NAME = 'db.sync'
     FULL_DOC_IDS = 'docs.docid, docs.doc_id, revid, sequence, json, current, deleted, parent'
 
-    def __init__(self, path, name, on_stmt=None):
-        if path is None or not isinstance(path, basestring):
-            raise ValueError("path must be a string")
-        if name is None or not isinstance(name, basestring):
-            raise ValueError("name must be a string")
-        self.__path = path
-        self.__name = name
-        self.__extensions_dir = os.path.join(path, "extensions")
-        dbfile = os.path.join(path, self.DB_FILE_NAME)
-        self.__db = Database(sqlite3.connect(dbfile), on_stmt)
+    def __init__(self, path, name, on_stmt=None, in_memory=False):
+        if not in_memory:
+            if path is None or not isinstance(path, basestring):
+                raise ValueError("path must be a string")
+            if name is None or not isinstance(name, basestring):
+                raise ValueError("name must be a string")
+            self.__path = path
+            self.__name = name
+            self.__extensions_dir = os.path.join(path, "extensions")
+            dbfile = os.path.join(path, self.DB_FILE_NAME)
+            self.__db = Database(sqlite3.connect(dbfile), on_stmt)
+        else:
+            self.__path = ':memory:'
+            self.__name = name
+            self.__db = Database(sqlite3.connect(':memory:'), on_stmt)
         self.__update_schema(SCHEMA_VERSION_3, 3)
         self.__update_schema(getSCHEMA_VERSION_4(), 4)
         self.__callbacks = {}
@@ -112,7 +117,7 @@ class Datastore(object):
     def get_numeric_id(self, docid):
         c = self.__db.execute('SELECT doc_id FROM docs WHERE docid = ?', (docid,))
         result = c.fetchone()
-        if result is not None and result[0] is not Node:
+        if result is not None and result[0] is not None:
             return long(result[0])
         return -1L
 
@@ -179,7 +184,7 @@ class Datastore(object):
             raise ValueError('expected a DocumentBody')
         if doc_id is None:
             doc_id = str(uuid.uuid4()).replace('-', '')
-        if any(map(lambda key: key.startswith('_'), body.to_dict.keys())):
+        if any(map(lambda key: key.startswith('_'), body.to_dict().keys())):
             raise ValueError('documents may not have attributes that begin with "_"')
         self.__db.begin_transaction()
         event = None
@@ -191,6 +196,7 @@ class Datastore(object):
             new_seq = self.__insert_rev(numeric_id, rev_id, -1, False, True, body.to_bytes(), True)
             doc = self.get(doc_id, rev_id)
             event = DocumentCreated(doc)
+            self.__db.set_transaction_success()
             return doc
         finally:
             if event is not None:
@@ -227,7 +233,7 @@ class Datastore(object):
             raise ValueError('must have a doc_id to update')
         if prev_revid is None:
             raise ValueError('must have a prev_rev to update')
-        if any(map(lambda key: key.startswith('_'), body.to_dict.keys())):
+        if any(map(lambda key: key.startswith('_'), body.to_dict().keys())):
             raise ValueError('documents may not have attributes that begin with "_"')
         int(prev_revid.split('-')[0])
         updated = None
@@ -276,6 +282,41 @@ class Datastore(object):
             else:
                 raise ConflictError('error updating local docs: ' + pre_rev)
         finally:
+            self.__db.end_transaction()
+
+    def delete(self, doc_id, prev_revid):
+        if self.__db.is_closed():
+            raise ValueError('database is closed')
+        if doc_id is None or len(doc_id) == 0:
+            raise ValueError('must have a doc_id to delete')
+        if prev_revid is None or len(prev_revid) == 0:
+            raise ValueError('must have a prev_revid to delete')
+        doc_deleted = None
+        self.__db.begin_transaction()
+        try:
+            pre_rev = self.get(doc_id, prev_revid)
+            if pre_rev is None:
+                raise ConflictError('document to delete does not exist')
+            rev_tree = self.get_revisions(doc_id)
+            if rev_tree is None:
+                raise ConflictError('document does not exist for id: ' + doc_id)
+            elif prev_revid not in rev_tree.leaf_revids():
+                raise ConflictError('revision to be deleted is not a leaf revision: ' + prev_revid)
+            if not pre_rev.deleted:
+                self.__checkoff_prev_winner(pre_rev)
+                new_revid = Datastore.__new_rev(prev_revid)
+                self.__insert_rev(pre_rev.internal_id, new_revid, pre_rev.sequence, True, pre_rev.current, '{}', False)
+                new_rev = self.get(doc_id, new_revid)
+                doc_deleted = DocumentDeleted(pre_rev, new_rev)
+            self.__db.set_transaction_success()
+        finally:
+            if doc_deleted is not None:
+                l = self.__callbacks.get('DocumentDeleted', [])
+                for cb in l:
+                    try:
+                        cb(doc_deleted)
+                    except:
+                        pass
             self.__db.end_transaction()
 
     @staticmethod

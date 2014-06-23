@@ -56,9 +56,13 @@ class DocumentRevision(object):
 
     @staticmethod
     def from_row(row):
-        doc_id, internal_id, rev_id, sequence, json, current, deleted = row
-        return DocumentRevision(doc_id, rev_id, DocumentBody(bytes_value=json), sequence, internal_id, deleted > 0,
-                                current > 0)
+        doc_id, internal_id, rev_id, sequence, json, current, deleted, parent = row
+        if parent is not None:
+            parent = long(parent)
+        else:
+            parent = -1L
+        return DocumentRevision(str(doc_id), str(rev_id), DocumentBody(bytes_value=bytes(json)), long(sequence),
+                                long(internal_id), deleted > 0, current > 0, parent)
 
     @property
     def generation(self):
