@@ -213,6 +213,8 @@ class Datastore(object):
             event = DocumentCreated(doc)
             self.__db.set_transaction_success()
             return doc
+        except sqlite3.IntegrityError:
+            raise ConflictError('document with that ID already exists')
         finally:
             if event is not None:
                 l = self.__callbacks.get('DocumentCreated', [])

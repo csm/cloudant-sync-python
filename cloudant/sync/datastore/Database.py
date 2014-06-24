@@ -30,7 +30,7 @@ class Database(object):
         return c.fetchone()[0]
 
     def is_closed(self):
-        return self.__connection is not None
+        return self.__connection is None
 
     def close(self):
         if self.__connection is not None:

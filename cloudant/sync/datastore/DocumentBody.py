@@ -51,3 +51,8 @@ class DocumentBody(object):
         if self.__bytes is not None:
             return self.__bytes
         return json.dumps(self.__dict)
+
+    def __repr__(self):
+        if self.__dict is not None:
+            return 'DocumentBody(dict_value=%r)' % self.__dict
+        return 'DocumentBody(bytes_value=%r)' % self.__bytes

@@ -134,3 +134,7 @@ class DocumentRevision(object):
         if not isinstance(other, DocumentRevision):
             raise ValueError('object to compare must be a DocumentRevision')
         return cmp(self.sequence, other.sequence)
+
+    def __repr__(self):
+        return 'DocumentRevision(docid=%r, revid=%r, body=%r, sequence=%r, internal_id=%r, deleted=%r, current=%r, parent=%r)' \
+               % (self.docid, self.revid, self.body, self.sequence, self.internal_id, self.deleted, self.current, self.parent)
