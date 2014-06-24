@@ -3,9 +3,9 @@ import StringIO
 
 
 class Attachment(object):
-    def __init__(self, name=None, type=None, size=0):
+    def __init__(self, name=None, content_type=None, size=0):
         self.__name = name
-        self.__type = type
+        self.__content_type = content_type
         self.__size = size
 
     @property
@@ -17,12 +17,12 @@ class Attachment(object):
         self.__name = name
 
     @property
-    def type(self):
-        return self.__type
+    def content_type(self):
+        return self.__content_type
 
-    @type.setter
-    def set_type(self, type):
-        self.__type = type
+    @content_type.setter
+    def set_content_type(self, content_type):
+        self.__content_type = content_type
 
     @property
     def size(self):
@@ -37,9 +37,9 @@ class Attachment(object):
 
 
 class SavedAttachment(Attachment):
-    def __init__(self, name, revpos, seq, key, type, file):
-        Attachment.__init__(name, type, os.path.getsize(file))
-        self.__file = file
+    def __init__(self, name, revpos, seq, key, content_type, path):
+        Attachment.__init__(self, name, content_type, os.path.getsize(path))
+        self.__path = path
         self.__revpos = revpos
         self.__seq = seq
         self.__key = key
@@ -57,12 +57,12 @@ class SavedAttachment(Attachment):
         return self.__key
 
     def get_data(self):
-        return open(self.__file, 'rb')
+        return open(self.__path, 'rb')
 
 
 class UnsavedBytesAttachment(Attachment):
-    def __init__(self, name, type, data):
-        Attachment.__init__(name, type, len(data))
+    def __init__(self, name, content_type, data):
+        Attachment.__init__(self, name, content_type, len(data))
         self.__bytes = data
 
     def get_data(self):
