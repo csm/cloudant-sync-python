@@ -7,4 +7,5 @@ setup(name='cloudant-sync-python',
       author='Casey Marshall',
       author_email='casey.s.marshall@gmail.com',
       packages=['cloudant', 'cloudant.sync', 'cloudant.sync.datastore'],
+      requires=['requests', 'enum34'],
       test_suite='tests.get_tests')
