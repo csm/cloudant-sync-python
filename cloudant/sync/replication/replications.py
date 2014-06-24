@@ -25,6 +25,9 @@ class ReplicationFilter(object):
         parts.sort()
         return '&'.join(parts)
 
+    def __repr__(self):
+        return 'ReplicationFilter(name=%r, parameters=%r)' % (self.name, self.parameters)
+
 
 class Replication(object):
     def __init__(self, username=None, password=None):
@@ -96,6 +99,10 @@ class PullReplication(Replication):
         assert self.target is not None
         urlparse.urlparse(self.uri, allow_fragments=False)
 
+    def __repr__(self):
+        return 'PullReplication(uri=%r, target=%r, filter=%r, username=%r)' % (self.uri, self.target.name, self.filter,
+                                                                               self.username)
+
 
 class PushReplication(Replication):
     def __init__(self, uri=None, source=None, username=None, password=None):
@@ -127,6 +134,9 @@ class PushReplication(Replication):
         assert self.uri is not None
         assert self.source is not None
         urlparse.urlparse(self.uri, allow_fragments=False)
+
+    def __repr__(self):
+        return 'PushReplication(uri=%r, source=%s, username=%s)' % (self.uri, self.source.name, self.username)
 
 def replicator(replication):
     if isinstance(replication, PushReplication):

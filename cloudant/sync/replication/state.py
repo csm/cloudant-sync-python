@@ -8,3 +8,7 @@ class State(Enum):
     STOPPING = 4
     COMPLETE = 5
     ERROR = 6
+
+
+class IllegalStateError(Exception):
+    pass
