@@ -1,3 +1,5 @@
+![Travis](https://travis-ci.org/csm/cloudant-sync-python.svg)
+
 This is a port of [Cloudant Sync for Android](https://github.com/cloudant/sync-android) to Python.
 
 It is essentially a better-embeddable version of [Apache CouchDB](http://couchdb.apache.org/) that can sync between
