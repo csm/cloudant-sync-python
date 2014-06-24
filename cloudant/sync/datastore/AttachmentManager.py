@@ -4,7 +4,6 @@ import hashlib
 import os
 
 from .Attachment import Attachment, SavedAttachment
-from .Datastore import Datastore
 from .DocumentRevision import DocumentRevision
 
 class PreparedAttachment(object):
@@ -39,7 +38,6 @@ class AttachmentManager(object):
     GZIP_ENCODING = 1
 
     def __init__(self, datastore):
-        assert isinstance(datastore, Datastore)
         self.__datastore = datastore
         self.__attachments_dir = datastore.extension_data_dir('com.cloudant.attachments')
 
