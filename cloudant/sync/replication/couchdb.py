@@ -2,8 +2,14 @@ import json
 import requests
 import urllib
 
+from cloudant.sync.datastore import DocumentRevision
+
 
 class CouchDB(object):
+    """
+    A utility class for accessing a CouchDB database.
+    """
+
     def __init__(self, host, port, database, username, password, secure=False):
         self.__url = '%s://%s:%d/%s' % ('https' if secure else 'http', host, port, database)
         self.__session = requests.session()
@@ -19,12 +25,18 @@ class CouchDB(object):
     def database(self):
         return self.__database
 
+    def create(self):
+        """
+        Create this database, or return an error if it already exists.
+        """
+        self.__session.put(self.__url).raise_for_status()
+
     def get_checkpoint(self, checkpoint_id):
         try:
             r = self.__session.get('%s/_local/%s' % (self.__url, urllib.quote_plus(checkpoint_id)))
             r.raise_for_status()
             return r.json().get('lastSequence')
-        except Exception, e:
+        except IOError, e:
             return None
 
     def set_checkpoint(self, checkpoint_id, sequence):
@@ -50,7 +62,10 @@ class CouchDB(object):
         return r.json()
 
     def get_revs(self, docid, revisions):
-        raise NotImplementedError()
+        params = dict(revs=True, attachments=True, open_revs=json.dumps(revisions))
+        r = self.__session.get('%s/%s' % (self.__url, urllib.quote_plus(docid)), params=params)
+        r.raise_for_status()
+        return r.json()
 
     def create(self, obj):
         r = self.__session.post(self.__url, data=json.dumps(obj), headers={'Content-type': 'application/json'})
@@ -75,3 +90,10 @@ class CouchDB(object):
         r.raise_for_status()
         return r.json()
 
+    def bulk(self, revs):
+        if len(revs) == 0 or not all(map(lambda e: isinstance(e, DocumentRevision), revs)):
+            raise ValueError('revs must be a list of DocumentRevisions')
+        objs = map(lambda e: e.to_dict(), revs)
+        r = self.__session.post('%s/_bulk_docs' % self.__url, data=json.dumps({'docs': objs}))
+        r.raise_for_status()
+        return r.json()
