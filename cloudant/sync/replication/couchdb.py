@@ -7,7 +7,8 @@ class CouchDB(object):
     def __init__(self, host, port, database, username, password, secure=False):
         self.__url = '%s://%s:%d/%s' % ('https' if secure else 'http', host, port, database)
         self.__session = requests.session()
-        self.__session.auth = (username, password)
+        if username is not None and password is not None:
+            self.__session.auth = (username, password)
         self.__database = database
 
     def exists(self):
@@ -64,6 +65,8 @@ class CouchDB(object):
 
     def get(self, docid):
         r = self.__session.get('%s/%s' % (self.__url, urllib.quote_plus(docid)))
+        if r.status_code == 404:
+            return None
         r.raise_for_status()
         return r.json()
 
