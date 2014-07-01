@@ -21,7 +21,21 @@ from DocumentBody import DocumentBody
 
 
 class DocumentRevision(object):
+    """
+    A document revision in a datastore.
+    """
+
     def __init__(self, docid, revid, body=None, sequence=-1L, internal_id=0L, deleted=False, current=True, parent=-1L):
+        """
+        Create a new DocumentRevision. For the most part, you don't need to create these yourself.
+
+        Args:
+            docid: the document identifier.
+            revid: the document revision.
+            body: the optional DocumentBody.
+            sequence: the sequence number of this document within the datastore.
+
+        """
         if not isinstance(docid, basestring):
             raise ValueError('docid must be of type str')
         if revid is not None and not isinstance(revid, basestring):

@@ -7,7 +7,7 @@ import tempfile
 import time
 import unittest
 
-from cloudant.sync.datastore import Datastore
+from cloudant.sync.datastore import Datastore, DocumentBody
 from cloudant.sync.replication.couchdb import CouchDB
 from cloudant.sync.replication import *
 
@@ -63,7 +63,7 @@ class TestPullReplication(unittest.TestCase):
                                       target=self.__datastore, username=username, password=password)
         rep = replicator(replication)
         rep.start()
-        n = 100000000000
+        n = 100
         print rep.state
         while rep.state == State.STARTED:
             time.sleep(0.1)
@@ -77,6 +77,43 @@ class TestPullReplication(unittest.TestCase):
         doc = self.__datastore.get('test_doc2')
         self.assertIsNotNone(doc)
         self.assertEqual('baz', doc.body.to_dict().get('foo'))
+
+
+@unittest.skipIf(not couch_available, 'CouchDB must be available to run this test')
+class TestPushReplication(unittest.TestCase):
+    def setUp(self):
+        self.__tempdir = os.path.join(tempfile.gettempdir(), 'cloudant_sync_test_push_replication')
+        if not os.path.exists(self.__tempdir):
+            os.mkdir(self.__tempdir)
+        self.__datastore = Datastore(self.__tempdir, 'cloudant_sync_test_push_replication')
+        self.__couch = CouchDB('localhost', 5984, database='cloudant_sync_test_push_replication', username=username,
+                               password=password, secure=False)
+        self.__couch.create_database()
+
+    def tearDown(self):
+        self.__couch.delete_database()
+        shutil.rmtree(self.__tempdir)
+
+    def test_push(self):
+        self.__datastore.create(DocumentBody(dict_value=dict(foo='bar')), 'test_doc1')
+        self.__datastore.create(DocumentBody(dict_value=dict(foo='baz')), 'test_doc2')
+        replication = PushReplication('http://localhost:5984/cloudant_sync_test_push_replication',
+                                      self.__datastore, username, password)
+        rep = replicator(replication)
+        rep.start()
+        n = 100
+        while rep.state == State.STARTED:
+            time.sleep(0.1)
+            n -= 1
+            if n < 0:
+                self.fail('timed out waiting for replication to finish')
+        self.assertEqual(State.COMPLETE, rep.state)
+        doc = self.__couch.get('test_doc1')
+        self.assertIsNotNone(doc)
+        self.assertEqual('bar', doc.get('foo'))
+        doc = self.__couch.get('test_doc2')
+        self.assertIsNotNone(doc)
+        self.assertEqual('baz', doc.get('foo'))
 
 if __name__ == '__main__':
     unittest.main()

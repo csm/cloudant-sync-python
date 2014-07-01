@@ -38,10 +38,35 @@ from .DocumentRevisionTree import DocumentRevisionTree
 
 
 class Datastore(object):
+    """
+    A local data store.
+    """
+
     DB_FILE_NAME = 'db.sync'
     FULL_DOC_IDS = 'docs.docid, docs.doc_id, revid, sequence, json, current, deleted, parent'
 
     def __init__(self, path, name, on_stmt=None, in_memory=False):
+        """
+        Creates a new datastore.
+
+        If not creating an in-memory database, the path argument must be unique for the database
+        you are creating. That is, if you were to create two datastores test1 and test2, you should
+        do something like this:
+
+        >>> d1 = Datastore('/path/to/databases/test1', 'test1')
+        >>> d2 = Datastore('/path/to/databases/test2', 'test2')
+
+        Because, this constructor will place all data for this database directly beneath
+        the path you specify.
+
+        Args:
+            path: the directory to store the database file; must exist.
+            name: the name of this database.
+            on_stmt: an optional callback, which will be passed each SQLite statement
+                and argument list executed.
+            in_memory: if True, then use a :memory: database, and ignore path. Note
+                that in-memory datastores may only be used within a single thread.
+        """
         if not in_memory:
             if path is None or not isinstance(path, basestring):
                 raise ValueError("path must be a string")
@@ -92,11 +117,26 @@ class Datastore(object):
         return os.path.join(tempfile.gettempdir(), extension)
 
     def add_callback(self, name, callback):
+        """
+        Add a callback, which is invoked when various things occur.
+
+        Args:
+            name: The callback name; may be one of the following:
+                DocumentCreated: called when a new document is created.
+                DocumentDeleted: called when a document is deleted.
+                DocumentModified: called when an existing document is modified.
+            callback: a callable that should accept a single event argument,
+                which will be a DocumentCreated, DocumentDeleted, or a
+                DocumentModified instance.
+        """
         l = self.__callbacks.get(name, [])
         l.append(callback)
         self.__callbacks[name] = l
 
     def remove_callback(self, name, callback):
+        """
+        Remove a callback.
+        """
         try:
             l = self.__callbacks[name]
             l.remove(callback)
@@ -120,6 +160,15 @@ class Datastore(object):
         return self.__get_connection()
 
     def get(self, doc_id, rev=None):
+        """
+        Fetch a document.
+
+        Args:
+            doc_id: the ID of the document.
+            rev: the revision of the document to fetch. If not given, the current revision is returned.
+        Returns:
+            A DocumentRevision object containing the document, or None if the document was not found.
+        """
         if rev is None:
             args = (doc_id,)
             sql = 'SELECT ' + self.FULL_DOC_IDS + ' FROM revs, docs' \
@@ -132,6 +181,10 @@ class Datastore(object):
         return DocumentRevision.from_cursor(c)
 
     def get_local(self, doc_id, rev=None):
+        """
+        Fetch a local document.
+
+        """
         cursor = self.__get_connection().execute('SELECT revid, json FROM localdocs WHERE docid=?', [doc_id])
         res = cursor.fetchone()
         if res is not None:
@@ -167,9 +220,17 @@ class Datastore(object):
         return tree
 
     def changes(self, since, limit):
+        """
+        Fetch changes that have occurred to this datastore.
+
+        Args:
+            since: the sequence number whence to start fetching changes.
+            limit: the maximum number of changes to fetch.
+        """
         since = min(0, since)
         c = self.__get_connection().execute('SELECT doc_id, max(sequence) FROM revs'
-                              ' WHERE sequence > ? AND sequence <= ? GROUP BY doc_id', (since, since + limit))
+                                            ' WHERE sequence > ? AND sequence <= ? GROUP BY doc_id',
+                                            (since, since + limit))
         ids = map(lambda r: r[0], c.fetchall())
         last_seq = max(ids)
         revs = self.__get_by_internal_ids(ids)
@@ -235,6 +296,15 @@ class Datastore(object):
             db.end_transaction()
 
     def create_local(self, body, doc_id=None):
+        """
+        Create a local document. Local documents behave similarly to normal documents, but are not replicated.
+
+        Args:
+            body: A DocumentBody object giving the body of the new document.
+            doc_id: The document identifier. If omitted, a random identifier will be assigned.
+        Returns:
+            The DocumentRevision for the document that was just created.
+        """
         if not isinstance(body, DocumentBody):
             raise ValueError('expected a DocumentBody')
         if doc_id is None:
