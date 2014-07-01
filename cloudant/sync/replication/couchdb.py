@@ -1,3 +1,4 @@
+import email
 import json
 import requests
 import urllib
@@ -25,11 +26,14 @@ class CouchDB(object):
     def database(self):
         return self.__database
 
-    def create(self):
+    def create_database(self):
         """
         Create this database, or return an error if it already exists.
         """
         self.__session.put(self.__url).raise_for_status()
+
+    def delete_database(self):
+        self.__session.delete(self.__url).raise_for_status()
 
     def get_checkpoint(self, checkpoint_id):
         try:
@@ -62,9 +66,16 @@ class CouchDB(object):
         return r.json()
 
     def get_revs(self, docid, revisions):
-        params = dict(revs=True, attachments=True, open_revs=json.dumps(revisions))
+        params = dict(revs='true', attachments='true', open_revs=json.dumps(revisions))
         r = self.__session.get('%s/%s' % (self.__url, urllib.quote_plus(docid)), params=params)
         r.raise_for_status()
+        # CouchDB may return multipart/mixed content here. Handle that.
+        if r.headers['content-type'].startswith('multipart/mixed'):
+            # there's got to be a better way...
+            msg = email.message_from_string('Content-Type: %s\r\n\r\n%s' % (r.headers['content-type'], r.content))
+            for item in msg.get_payload():
+                if item.get('content-type') == 'application/json':
+                    return json.loads(item.get_payload())
         return r.json()
 
     def create(self, obj):

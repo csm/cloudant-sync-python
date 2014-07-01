@@ -17,7 +17,9 @@
 # and limitations under the License.
 
 import base64
+import collections
 import itertools
+import logging
 import os
 import sqlite3
 import tempfile
@@ -65,13 +67,15 @@ class Datastore(object):
         try:
             return self.__dblocal.db
         except AttributeError:
-            self.__dblocal.db = Database(sqlite3.connect(self.__dbfile), self.__onstmt)
+            self.__dblocal.db = Database(sqlite3.connect(self.__dbfile, check_same_thread=False), self.__onstmt)
             return self.__dblocal.db
 
     def __update_schema(self, schema, version):
         db = self.__get_connection()
         db.execute('PRAGMA foreign_keys = ON;')
         dbversion = db.get_version()
+        logging.getLogger('cloudant.sync.datastore').info('checking schema version %r database version %r',
+                                                          version, dbversion)
         if dbversion < version:
             try:
                 db.begin_transaction()
@@ -134,7 +138,7 @@ class Datastore(object):
             rev_id = res[0]
             if rev is not None and rev != rev_id:
                 return None
-            body = DocumentBody(bytes_value=res[1])
+            body = DocumentBody(bytes_value=bytes(res[1]))
             doc = DocumentRevision(doc_id, rev_id, body)
             return doc
         return None
@@ -391,6 +395,39 @@ class Datastore(object):
             self.__invoke_callbacks('DocumentCreated', doc_created)
             self.__invoke_callbacks('DocumentUpdated', doc_updated)
             db.end_transaction()
+
+    def revs_diff(self, revs):
+        missing_revs = collections.defaultdict(list)
+        batches = self.__multimap_partitions(revs, 500)
+        for batch in batches:
+            batch = self.__revs_diff_batch(batch)
+            for key, values in batch.iteritems():
+                missing_revs[key] = values
+        return missing_revs
+
+    def __multimap_partitions(self, multimap, limit=500):
+        maps = []
+        current = collections.defaultdict(list)
+        for key, values in multimap.iteritems():
+            current[key] = values
+            if sum(map(len, current.values())) + len(current) >= limit:
+                maps.append(current)
+                current = collections.defaultdict(list)
+        if len(current) > 0:
+            maps.append(current)
+        return maps
+
+    def __revs_diff_batch(self, batch):
+        sql = "SELECT docs.docid, revs.revid FROM docs, revs " \
+              "WHERE docs.doc_id = revs.doc_id AND docs.docid IN (%s) AND revs.revid IN (%s) " \
+              "ORDER BY docs.docid" % (','.join(itertools.repeat('?', len(batch))), ','.join(itertools.repeat('?', sum(map(len, batch.values())))))
+        db = self.__get_connection()
+        l = list(batch.keys()) + reduce(lambda x, y: x + y, batch.values())
+        logging.getLogger('cloudant.sync.datastore').debug('rev_diff batch args: %r', l)
+        c = db.execute(sql, l)
+        for row in c:
+            batch.get(row[0], []).remove(row[1])
+        return batch
 
     def __do_force_create(self, doc_rev, rev_history):
         assert not doc_rev.docid in self

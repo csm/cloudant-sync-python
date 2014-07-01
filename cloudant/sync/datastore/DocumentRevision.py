@@ -22,9 +22,9 @@ from DocumentBody import DocumentBody
 
 class DocumentRevision(object):
     def __init__(self, docid, revid, body=None, sequence=-1L, internal_id=0L, deleted=False, current=True, parent=-1L):
-        if not isinstance(docid, str):
+        if not isinstance(docid, basestring):
             raise ValueError('docid must be of type str')
-        if revid is not None and not isinstance(revid, str):
+        if revid is not None and not isinstance(revid, basestring):
             raise ValueError('revid must be of type str')
         if body is not None and not isinstance(body, DocumentBody):
             raise ValueError('body must be of type DocumentBody, or None')

@@ -138,10 +138,12 @@ class PushReplication(Replication):
     def __repr__(self):
         return 'PushReplication(uri=%r, source=%s, username=%s)' % (self.uri, self.source.name, self.username)
 
-def replicator(replication):
+def replicator(replication, on_completed=None, on_errored=None, config=None, executor=None):
     if isinstance(replication, PushReplication):
         from .replicators import PushReplicator
-        return PushReplicator(replication)
+        return PushReplicator(replication, on_completed=on_completed, on_errored=on_errored, config=config,
+                              executor=executor)
     if isinstance(replication, PullReplication):
         from .replicators import PullReplicator
-        return PullReplicator(replication)
+        return PullReplicator(replication, on_completed=on_completed, on_errored=on_errored, config=config,
+                              executor=executor)
