@@ -85,6 +85,7 @@ class Datastore(object):
         self.__dblocal = threading.local()
         self.__update_schema(SCHEMA_VERSION_3, 3)
         self.__update_schema(getSCHEMA_VERSION_4(), 4)
+        self.__update_schema(SCHEMA_VERSION_5, 5)
         self.__callbacks = {}
         self.__attachment_manager = AttachmentManager(self)
 
@@ -227,12 +228,15 @@ class Datastore(object):
             since: the sequence number whence to start fetching changes.
             limit: the maximum number of changes to fetch.
         """
-        since = min(0, since)
+        since = max(0, since)
         c = self.__get_connection().execute('SELECT doc_id, max(sequence) FROM revs'
                                             ' WHERE sequence > ? AND sequence <= ? GROUP BY doc_id',
-                                            (since, since + limit))
-        ids = map(lambda r: r[0], c.fetchall())
-        last_seq = max(ids)
+                                            (str(since), str(since + limit)))
+        ids = []
+        last_seq = 0
+        for row in c:
+            ids.append(row[0])
+            last_seq = max([last_seq, row[1]])
         revs = self.__get_by_internal_ids(ids)
         return Changes(last_seq, revs)
 
@@ -474,6 +478,9 @@ class Datastore(object):
             for key, values in batch.iteritems():
                 missing_revs[key] = values
         return missing_revs
+
+    def attachments_for_revision(self, rev):
+        return self.__attachment_manager.all_attachments(rev)
 
     def __multimap_partitions(self, multimap, limit=500):
         maps = []

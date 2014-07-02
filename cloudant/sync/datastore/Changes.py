@@ -14,8 +14,12 @@ class Changes(object):
     def results(self):
         return copy.copy(self.__revs)
 
-    def __len__(self): return len(self.__revs)
+    def __len__(self):
+        return len(self.__revs)
 
     @property
     def ids(self):
         return map(lambda rev: rev.docid, self.__revs)
+
+    def __repr__(self):
+        return '%s(last_seq=%d, revs=%r)' % (Changes.__name__, self.last_seq, self.results)

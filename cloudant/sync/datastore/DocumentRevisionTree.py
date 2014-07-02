@@ -77,7 +77,7 @@ class DocumentRevisionTree(object):
         self.__sequence_map[rev.sequence] = node
 
     def lookup(self, doc_id, rev):
-        for node in self.__sequence_map:
+        for node in self.__sequence_map.values():
             if node.data.docid == doc_id and node.data.revid == rev:
                 return node.data
         return None
@@ -127,10 +127,8 @@ class DocumentRevisionTree(object):
                 return node.data
         raise ValueError('no current leaf in this tree')
 
-    def path_for_node(self, rev):
-        if not isinstance(rev, DocumentRevision):
-            raise ValueError('expected a DocumentRevision')
-        node = self.__sequence_map[rev.sequence]
+    def path_for_node(self, seq):
+        node = self.__sequence_map[seq]
         ret = []
         while node is not None:
             ret.insert(0, node)

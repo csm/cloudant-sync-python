@@ -99,6 +99,9 @@ class PullReplication(Replication):
         assert self.target is not None
         urlparse.urlparse(self.uri, allow_fragments=False)
 
+    def __str__(self):
+        return repr(self)
+
     def __repr__(self):
         return 'PullReplication(uri=%r, target=%r, filter=%r, username=%r)' % (self.uri, self.target.name, self.filter,
                                                                                self.username)
@@ -134,6 +137,9 @@ class PushReplication(Replication):
         assert self.uri is not None
         assert self.source is not None
         urlparse.urlparse(self.uri, allow_fragments=False)
+
+    def __str__(self):
+        return repr(self)
 
     def __repr__(self):
         return 'PushReplication(uri=%r, source=%s, username=%s)' % (self.uri, self.source.name, self.username)

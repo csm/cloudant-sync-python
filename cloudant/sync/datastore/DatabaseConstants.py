@@ -64,3 +64,8 @@ def getSCHEMA_VERSION_4():
         SCHEMA_VERSION_4[1] % str(uuid.uuid4()).replace('-', ''),
         SCHEMA_VERSION_4[2] % str(uuid.uuid4()).replace('-', '')
     ]
+
+SCHEMA_VERSION_5 = [
+    "ALTER TABLE attachments ADD COLUMN encoding INTEGER DEFAULT 0;",
+    "ALTER TABLE attachments ADD COLUMN encoded_length INTEGER DEFAULT 0;"
+]

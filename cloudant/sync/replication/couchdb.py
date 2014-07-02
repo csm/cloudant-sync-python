@@ -1,5 +1,6 @@
 import email
 import json
+import logging
 import requests
 import urllib
 
@@ -108,3 +109,22 @@ class CouchDB(object):
         r = self.__session.post('%s/_bulk_docs' % self.__url, data=json.dumps({'docs': objs}))
         r.raise_for_status()
         return r.json()
+
+    def bulk_serialized(self, revs):
+        payload = '{"new_edits":false,"docs":[%s]}' % ','.join(revs)
+        r = self.__session.post('%s/_bulk_docs' % self.__url, data=payload, headers={'Content-type': 'application/json'})
+        logging.getLogger('cloudant.sync.replication').debug('serialized payload: %r', payload)
+        r.raise_for_status()
+        return r.json()
+
+    def revs_diff(self, revs):
+        r = self.__session.post('%s/_revs_diff' % self.__url, data=json.dumps(revs))
+        r.raise_for_status()
+        diffs = r.json()
+        result = {}
+        logging.getLogger('cloudant.sync.replication').debug('got diffs: %r', diffs)
+        for key, value in diffs.iteritems():
+            missing = value.get('missing')
+            if missing is not None:
+                result[key] = missing
+        return result

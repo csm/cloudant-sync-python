@@ -1,6 +1,8 @@
+import base64
 from collections import defaultdict
 import concurrent.futures
 from itertools import izip_longest
+import json
 import logging
 from threading import Thread, Condition
 import time
@@ -212,16 +214,130 @@ class PullReplicator(Replicator):
 
 
 class PushConfiguration(object):
-    pass
+    def __init__(self, changes_per_batch=1000, max_batches=100, insert_batch_size=10):
+        self.changes_per_batch = changes_per_batch
+        self.max_batches = max_batches
+        self.insert_batch_size = insert_batch_size
+
+    def __repr__(self):
+        return '%s(changes_per_batch=%r, max_batches=%r, insert_batch_size=%r)' % (PushConfiguration.__name__,
+                                                                                   self.changes_per_batch,
+                                                                                   self.max_batches,
+                                                                                   self.insert_batch_size)
 
 
 class PushReplicator(Replicator):
     def __init__(self, replication, on_completed=None, on_errored=None, executor=None, config=None):
         super(PushReplicator, self).__init__(replication, on_completed, on_errored)
-        self._replication = replication
+        if not isinstance(replication, PushReplication):
+            raise ValueError('replication must be a PushReplication')
+        self.__replication = replication
+        u = urlparse.urlparse(replication.uri)
+        self.__target = CouchDB(u.hostname, u.port, u.path, replication.username, replication.password,
+                                u.scheme == 'https')
+        if config is None:
+            self.config = PushConfiguration()
+        else:
+            if not isinstance(config, PushConfiguration):
+                raise ValueError('config must be a PushConfiguration')
+            self.config = config
+        if executor is None:
+            self.__executor = concurrent.futures.ThreadPoolExecutor(4)
+        else:
+            if not isinstance(executor, concurrent.futures.Executor):
+                raise ValueError('executor must be a concurrent.futures.Executor')
+            self.__executor = executor
+        self.__doc_count = 0
+        self.__batch_count = 0
 
     def _replicate(self):
-        pass
+        _logger().info('Replication %r started', self)
+        start_time = time.time()
+        if self._cancel:
+            return
+        if not self.__target.exists():
+            raise DatabaseNotFoundError('database %s not found' % self.__target.database)
+        self.__doc_count = 0
+        self.__batch_count = 1
+        while self.__batch_count < self.config.max_batches:
+            if self._cancel:
+                return
+            _logger().info('Batch %d started (completed %d changes so far)', self.__batch_count, self.__doc_count)
+            batch_start_time = time.time()
+            last_seq = self.__target.get_checkpoint(self.__replication.source.get_public_id()) or 0
+            changes = self.__replication.source.changes(since=last_seq, limit=self.config.changes_per_batch)
+            changes_processed = 0
+            _logger().debug('last_seq: %d got changes: %r', last_seq, changes)
+            if len(changes) > 0:
+                changes_processed = self.__process_batch(changes)
+                self.__doc_count += changes_processed
+            batch_end_time = time.time()
+            _logger().info('Batch %d completed in %s seconds (processed %d changes)', self.__batch_count,
+                           batch_end_time - batch_start_time, changes_processed)
+            if len(changes) == 0:
+                break
+            self.__batch_count += 1
+        end_time = time.time()
+        _logger().info('Push completed in %s seconds (%s total changes processed)', end_time - start_time,
+                       self.__doc_count)
+
+    def __process_batch(self, changes):
+        num = 0
+        batches = map(lambda b: filter(lambda e: e is not None, b),
+                      izip_longest(*[iter(changes.results)]*self.config.insert_batch_size))
+        for batch in batches:
+            if self._cancel:
+                break
+            all_trees = reduce(lambda a, b: a.update(b) or a,
+                               map(lambda doc: {doc.docid: self.__replication.source.get_revisions(doc.docid)}, batch), {})
+            open_revs = PushReplicator.__open_revisions(all_trees)
+            missing_revs = self.__target.revs_diff(open_revs)
+            missing_json = self.__missing_to_json(all_trees, missing_revs)
+            if not self._cancel:
+                self.__target.bulk_serialized(missing_json)
+                num += len(missing_json)
+        if not self._cancel:
+            self.__target.set_checkpoint(self.__replication.source.get_public_id(), changes.last_seq)
+        return num
+
+    def __missing_to_json(self, all_trees, missing):
+        docs = []
+        for doc_id, missing_revs in missing.iteritems():
+            tree = all_trees.get(doc_id)
+            for rev in missing_revs:
+                seq = tree.lookup(doc_id, rev).sequence
+                path = map(lambda e: e.data, tree.path_for_node(seq))
+                doc_rev = path[0]
+                atts = self.__replication.source.attachments_for_revision(doc_rev)
+                cur = doc_rev.to_dict()
+                revpos = long(doc_rev.revid.split('-')[0])
+                att_list = {}
+                for att in atts:
+                    att_dict = {}
+                    if att.revpos < revpos:
+                        att_dict['stub'] = True
+                    else:
+                        with att.get_data() as f:
+                            data = base64.b64encode(f.read())
+                        att_dict['data'] = data
+                    att_dict['content_type'] = att.content_type
+                    att_dict['revpos'] = att.revpos
+                    att_list[att.name] = att_dict
+                cur['_attachments'] = att_list
+                revisions = {'start': revpos, 'ids': [s.revid.split('-')[1] for s in path]}
+                cur['_revisions'] = revisions
+                docs.append(json.dumps(cur))
+        return docs
+
+    @staticmethod
+    def __open_revisions(all_trees):
+        open_revs = defaultdict(list)
+        for key, value in all_trees.iteritems():
+            open_revs[key] += value.leaf_revids()
+        return open_revs
+
+    def __str__(self):
+        return 'PushReplicator(%s)' % self.replication
 
     def __repr__(self):
         return 'PushReplicator(%r)' % self.replication
