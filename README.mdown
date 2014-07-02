@@ -6,3 +6,9 @@ It is essentially a better-embeddable version of [Apache CouchDB](http://couchdb
 a local embedded DB and a remote CouchDB database.
 
 **It is not complete. If you are reading this statement, do not use this yet. Thanks.**
+
+## Running Tests
+
+Some tests require a local CouchDB running on port 5984. If you set authentication on your local CouchDB, then you need
+to define the environment variables `COUCHDB_USER` and `COUCHDB_PASSWORD`. If the unit tests can't access your CouchDB,
+those tests will be skipped.
